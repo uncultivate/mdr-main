@@ -13,7 +13,7 @@ const MAGIC_CONSTANT3 = 27;
 const CELL_SIZE = 48;
 
 // API base URL - configurable for production
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
 
 // Log the API URL when the component mounts (development only)
 if (process.env.NODE_ENV === 'development') {
@@ -198,7 +198,9 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   useEffect(() => {
     const fetchStrategies = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/available_strategies`);
+        const response = await fetch(`${API_BASE_URL}/api/available_strategies`, {
+          credentials: 'include'
+        });
         if (response.ok) {
           const data = await response.json();
           setAvailableStrategies(data.strategies);
@@ -407,6 +409,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ 
           total_magic_squares: magic3Qty + magic5Qty,
           strategy: searchStrategy
@@ -531,7 +534,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     );
     
     try {
-      console.log('Attempting to connect to backend at:', API_BASE_URL);
+      console.log('Attempting to connect to backend at:', `${API_BASE_URL}/api/detect_magic_square`);
       const response = await fetch(`${API_BASE_URL}/api/detect_magic_square`, {
         method: 'POST',
         headers: {
@@ -542,6 +545,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
           strategy: searchStrategy,
           window_coords: coords
         }),
+        credentials: 'include'
       });
       
       if (!response.ok) {
@@ -722,6 +726,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({
         name: customFunctionName,
         author: customFunctionAuthor,
@@ -766,6 +771,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ 
           verbose: !verboseLogging 
         }),
