@@ -15,6 +15,12 @@ const CELL_SIZE = 48;
 // API base URL - configurable for production
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
 
+// Helper function to construct API URLs correctly
+const getApiUrl = (endpoint: string) => {
+  endpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${API_BASE_URL}${endpoint}`;
+};
+
 // Log the API URL when the component mounts (development only)
 if (process.env.NODE_ENV === 'development') {
   console.log('API Base URL:', API_BASE_URL);
@@ -198,15 +204,18 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   useEffect(() => {
     const fetchStrategies = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/available_strategies`, {
+        const response = await fetch(getApiUrl('api/available_strategies'), {
           credentials: 'include'
         });
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableStrategies(data.strategies);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        const data = await response.json();
+        setAvailableStrategies(data.strategies);
       } catch (error) {
         console.error('Error fetching strategies:', error);
+        setToastMessage("Error connecting to backend server");
+        setTimeout(() => setToastMessage(""), 4000);
       }
     };
     
@@ -404,7 +413,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     
     // Reset backend state
     try {
-      const response = await fetch(`${API_BASE_URL}/api/reset_game`, {
+      const response = await fetch(getApiUrl('api/reset_game'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -534,18 +543,18 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     );
     
     try {
-      console.log('Attempting to connect to backend at:', `${API_BASE_URL}/api/detect_magic_square`);
-      const response = await fetch(`${API_BASE_URL}/api/detect_magic_square`, {
+      console.log('Attempting to connect to backend at:', getApiUrl('api/detect_magic_square'));
+      const response = await fetch(getApiUrl('api/detect_magic_square'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ 
           grid: gridToSend,
           strategy: searchStrategy,
           window_coords: coords
         }),
-        credentials: 'include'
       });
       
       if (!response.ok) {
@@ -721,7 +730,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     }
     
     // Submit to backend for validation and registration
-    fetch(`${API_BASE_URL}/api/add_custom_strategy`, {
+    fetch(getApiUrl('api/add_custom_strategy'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -766,7 +775,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
 
   const toggleVerboseLogging = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/toggle_verbose_logging`, {
+      const response = await fetch(getApiUrl('api/toggle_verbose_logging'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

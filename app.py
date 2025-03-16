@@ -19,14 +19,14 @@ app = Flask(__name__)
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
-    "https://*.vercel.app",  # Allows all Vercel preview domains
-    "https://mdr-main.vercel.app",  # Your main Vercel domain
-    "https://mdr-main-1gljf3sae-uncultivates-projects.vercel.app"  # Your specific deployment URL
+    "https://mdr-main-1gljf3sae-uncultivates-projects.vercel.app",  # Your specific Vercel deployment
+    "https://*.vercel.app"  # For preview deployments
 ]
 
+# Configure CORS with all necessary headers
 CORS(app, 
      resources={
-         r"/*": {  # Changed from /api/* to /* to catch all routes
+         r"/*": {
              "origins": allowed_origins,
              "methods": ["GET", "POST", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"],
@@ -34,20 +34,16 @@ CORS(app,
              "supports_credentials": True,
              "max_age": 3600
          }
-     },
-     allow_headers=["Content-Type", "Authorization"],
-     expose_headers=["Content-Type"],
-     supports_credentials=True)
+     })
 
-# Add CORS headers to all responses
 @app.after_request
 def after_request(response):
     origin = request.headers.get('Origin')
-    if origin in allowed_origins:
+    if origin and origin in allowed_origins:
         response.headers.add('Access-Control-Allow-Origin', origin)
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
 # Keep track of game state
