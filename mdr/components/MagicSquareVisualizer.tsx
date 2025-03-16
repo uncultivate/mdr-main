@@ -15,6 +15,11 @@ const CELL_SIZE = 48;
 // API base URL - configurable for production
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+// Log the API URL when the component mounts (development only)
+if (process.env.NODE_ENV === 'development') {
+  console.log('API Base URL:', API_BASE_URL);
+}
+
 type Coordinates = [number, number];
 type Grid = number[][];
 
@@ -526,6 +531,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     );
     
     try {
+      console.log('Attempting to connect to backend at:', API_BASE_URL);
       const response = await fetch(`${API_BASE_URL}/api/detect_magic_square`, {
         method: 'POST',
         headers: {
@@ -537,6 +543,10 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
           window_coords: coords
         }),
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
       const data = await response.json();
       
@@ -637,8 +647,12 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
       }
       
       return data;
-    } catch (error) {
-      console.error('Error detecting magic square:', error);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      console.error('Error connecting to backend:', error);
+      setToastMessage(`Error connecting to backend: ${errorMessage}`);
+      setTimeout(() => setToastMessage(""), 4000);
+      if (onError) onError(errorMessage);
       return null;
     }
   };

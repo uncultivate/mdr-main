@@ -14,13 +14,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-# Enable CORS with configurable origins for production
+
+# Configure CORS to allow requests from both localhost and Vercel
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://*.vercel.app",  # Allows all Vercel preview and production domains
+    "https://mdr-main.vercel.app",  # Your production Vercel domain
+    "https://*.mdr-main.vercel.app"  # Any subdomains of your Vercel app
+]
+
 CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "http://localhost:3000",  # Development frontend
-            "https://your-frontend-domain.com"  # Replace with your production frontend domain
-        ]
+    r"/api/*": {
+        "origins": allowed_origins,
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": True
     }
 })
 
