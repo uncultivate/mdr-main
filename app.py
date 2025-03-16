@@ -19,7 +19,7 @@ app = Flask(__name__)
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
-    "https://mdr-main-1gljf3sae-uncultivates-projects.vercel.app",  # Your specific Vercel deployment
+    "https://mdr-main.vercel.app",  # Your main Vercel domain
     "https://*.vercel.app"  # For preview deployments
 ]
 
@@ -39,7 +39,14 @@ CORS(app,
 @app.after_request
 def after_request(response):
     origin = request.headers.get('Origin')
-    if origin and origin in allowed_origins:
+    # Check if the origin matches any of our allowed patterns
+    allowed = False
+    for allowed_origin in allowed_origins:
+        if allowed_origin == origin or (allowed_origin.startswith('https://') and allowed_origin.endswith('.vercel.app')):
+            allowed = True
+            break
+    
+    if allowed:
         response.headers.add('Access-Control-Allow-Origin', origin)
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
