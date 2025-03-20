@@ -6,7 +6,7 @@ export default function Home() {
       <div className="max-w-6xl mx-auto">
         <h1 className="text-4xl font-bold mb-8 text-[#24e4f2]">Macrodata Refinement</h1>
         <p className="text-[#24e4f2] mb-8">Data Engineers, welcome to the Macrodata Refinement challenge!</p>
-        <p>Play as a human and use arrow keys to navigate the grid and find magic squares. Or add your own custom strategies and see how your AI performs.</p>
+        <p className="text-[#24e4f2] mb-8">Play as a human and use arrow keys to navigate the grid and find magic squares. Or add your own custom strategies and see how your AI performs.</p>
         <MagicSquareVisualizer />
       </div>
     </main>
