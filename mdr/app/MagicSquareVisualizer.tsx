@@ -793,7 +793,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
               onClick={resetGame}
               className="mt-2 bg-purple-800 hover:bg-purple-700 text-white hover:text-white"
             >
-              New Game
+              Reset
             </Button>
           </div>
         )}
@@ -917,7 +917,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
               onClick={resetGame}
               className="bg-[#00203a] hover:bg-[#001f2f] text-[#24e4f2] hover:text-[#24e4f2]"
             >
-              <RotateCcw className="h-4 w-4 mr-2" /> New Game
+              <RotateCcw className="h-4 w-4 mr-2" /> Reset
             </Button>
             
             <Button
