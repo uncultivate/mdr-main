@@ -271,9 +271,12 @@ def validate_{function_name}():
     # Mark some cells as unexplored
     test_grid[0, 0] = np.nan
     
+    # Create test window coordinates
+    test_window_coords = ((0, 0), (4, 4))
+    
     try:
         # Call the function with proper exception handling
-        function_result = {function_name}(test_grid)
+        function_result = {function_name}(test_grid, test_window_coords)
         
         # Check if the result is None
         if function_result is None:
