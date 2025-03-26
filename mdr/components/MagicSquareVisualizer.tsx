@@ -723,9 +723,26 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
       return;
     }
     
-    // Basic validation that it looks like a function
-    if (!customFunctionCode.includes('def') || !customFunctionCode.includes('grid') || !customFunctionCode.includes('return')) {
-      setCustomFunctionError("Your function should have a 'def' statement, accept a 'grid' parameter, and include a 'return' statement");
+    // Basic validation that it looks like a function with required parameters
+    if (!customFunctionCode.includes('def') || !customFunctionCode.includes('return')) {
+      setCustomFunctionError("Your function should have a 'def' statement and include a 'return' statement");
+      return;
+    }
+
+    // Extract the function parameters from the code
+    const paramsMatch = customFunctionCode.match(/def\s+\w+\s*\((.*?)\)/);
+    if (!paramsMatch) {
+      setCustomFunctionError("Could not find function parameters in the code");
+      return;
+    }
+
+    const params = paramsMatch[1].split(',').map(p => p.trim());
+    if (!params.includes('grid')) {
+      setCustomFunctionError("The function must accept a 'grid' parameter");
+      return;
+    }
+    if (!params.includes('window_coords')) {
+      setCustomFunctionError("The function must accept a 'window_coords' parameter");
       return;
     }
     
