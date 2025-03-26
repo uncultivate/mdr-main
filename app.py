@@ -252,6 +252,10 @@ def add_custom_strategy():
     if 'grid' not in code.split('(')[1].split(')')[0]:
         return jsonify({'error': 'The function must accept a "grid" parameter'}), 400
     
+    # Check for window_coords parameter
+    if 'window_coords' not in code.split('(')[1].split(')')[0]:
+        return jsonify({'error': 'The function must accept a "window_coords" parameter'}), 400
+    
     # Check for return statement
     if 'return' not in code:
         return jsonify({'error': 'The function must include a return statement'}), 400
@@ -291,6 +295,10 @@ def validate_{function_name}():
             return False, f"Function must return one of 'up', 'down', 'left', 'right', got '{{function_result}}'"
             
         return True, "Function validated successfully"
+    except TypeError as e:
+        if "missing 1 required positional argument" in str(e):
+            return False, f"Function is missing required parameters. Make sure it accepts both 'grid' and 'window_coords'"
+        return False, f"Error during function execution: {{str(e)}}"
     except Exception as e:
         return False, f"Error during function execution: {{str(e)}}"
 """)
