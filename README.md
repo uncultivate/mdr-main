@@ -142,13 +142,22 @@ def example_strategy(grid, window_coords):
 
 ## Getting Started
 
-1. Clone this repository
-2. Install required dependencies:
-   ```bash
-   pip install numpy
-   ```
-3. Implement your search strategy
-4. Test your strategy with different grid configurations
-5. Submit your solution
+1. Visit [Macrodata Refinement Web App](https://mdr-main.vercel.app/) to:
+   - Play the game manually using arrow keys
+   - Test your custom search strategies
+   - Experiment with different grid sizes and magic square quantities
+   - Enable verbose logging for detailed information
+
+2. Develop your search strategy:
+   - Create a Python function that accepts `grid` and `window_coords` parameters
+   - Test your strategy in the web app
+   - Optimize for efficiency and completeness
+
+3. Submit your entry:
+   - Visit [Contest Submission Page](https://contest.streamlit.app/)
+   - Submit your solution before April 4th, 2025
+   - Include your name, contact information, and strategy code
+   - Add any documentation or notes about your approach
+
 
 Good luck with the challenge! 
