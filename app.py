@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
-from magic_square import detect_magic_square_and_navigate
+from magic_square import calculate_next_direction
 import logging
 import importlib.util
 import sys
@@ -60,7 +60,7 @@ game_state = {
     'magic_squares_found': 0,
     'total_magic_squares': 0,
     'game_over': False,
-    'search_strategy': 'exploration',  # Default search strategy
+    'search_strategy': 'random_walk',  # Default search strategy
     'found_squares': [],  # List to store positions of found magic squares
     'verbose_logging': True  # Default verbose logging to True for diagnostics
 }
@@ -82,135 +82,91 @@ def toggle_verbose_logging():
         'verbose_logging': game_state['verbose_logging']
     })
 
-@app.route('/api/detect_magic_square', methods=['POST'])
-def detect_magic_square():
+@app.route('/api/get_next_move', methods=['POST'])
+def get_next_move():
     data = request.json
     
-    # Convert grid to float array to handle NaN values properly
-    grid = np.array(data['grid'], dtype=float)
+    # Convert grid to float array
+    try:
+        grid_data = data['grid']
+        if not isinstance(grid_data, list) or len(grid_data) == 0 or not isinstance(grid_data[0], list):
+            raise ValueError("Invalid grid format")
+        grid = np.array(grid_data, dtype=float)
+        if len(grid.shape) != 2:
+            raise ValueError(f"Invalid grid dimensions: {grid.shape}")
+    except (KeyError, ValueError) as e:
+        logger.error(f"Error processing grid data: {str(e)}")
+        return jsonify({'error': str(e), 'next_direction': 'right', 'steps': game_state['steps']}), 400
+
     strategy = data.get('strategy', game_state['search_strategy'])
-    
-    # Extract window coordinates if provided
     window_coords = data.get('window_coords')
-    
-    # Log grid information
-    logger.info(f"Grid shape before conversion: {grid.shape}")
-    logger.info(f"Grid type: {type(grid)}, contains NaN: {np.any(np.isnan(grid))}")
+    found_squares = data.get('found_squares', []) # Get revealed squares from frontend
+
+    # Validate window_coords format if provided
     if window_coords:
-        (min_row, min_col), (max_row, max_col) = window_coords
-        window_height = max_row - min_row + 1
-        window_width = max_col - min_col + 1
-        window_center_row = min_row + window_height // 2
-        window_center_col = min_col + window_width // 2
-        logger.info(f"WINDOW POSITION IN API: Center=({window_center_row},{window_center_col}), " +
-                   f"Bounds=({min_row},{min_col}) to ({max_row},{max_col}), " +
-                   f"Size={window_height}x{window_width}")
-    
-    # Add verbose logging of the actual grid content if enabled
-    if game_state['verbose_logging']:
-        # Log information about found squares
-        if game_state['found_squares']:
-            logger.info(f"Found squares list contains {len(game_state['found_squares'])} entries:")
-            for i, square in enumerate(game_state['found_squares']):
-                logger.info(f"  Square {i+1}: {square}")
-        else:
-            logger.info("No magic squares have been found yet")
-        
-        # Format the grid for logging - limit to first few rows/columns if large
-        if grid.shape[0] > 10 or grid.shape[1] > 10:
-            visible_grid = grid[:min(10, grid.shape[0]), :min(10, grid.shape[1])]
-            logger.info(f"Grid preview (first 10x10 or smaller):\n{np.array2string(visible_grid, precision=1, separator=', ', threshold=100, edgeitems=3)}")
-        else:
-            logger.info(f"Grid content:\n{np.array2string(grid, precision=1, separator=', ', threshold=100)}")
-        
-        # Log detailed window coordinates
-        if window_coords:
-            (min_row, min_col), (max_row, max_col) = window_coords
-            window_height = max_row - min_row + 1
-            window_width = max_col - min_col + 1
-            logger.info(f"Window dimensions: {window_height}x{window_width}")
-            logger.info(f"Window region: rows {min_row}-{max_row}, cols {min_col}-{max_col}")
-    
-    # Validate the grid shape
-    rows, cols = grid.shape
-    if rows != cols:
-        logger.warning(f"Grid is not square: {grid.shape}")
-    
+        try:
+            if (not isinstance(window_coords, list) or len(window_coords) != 2 or
+                not isinstance(window_coords[0], list) or not isinstance(window_coords[1], list) or
+                len(window_coords[0]) != 2 or len(window_coords[1]) != 2):
+                logger.warning(f"Invalid window_coords format: {window_coords}, ignoring.")
+                window_coords = None
+        except Exception as e:
+            logger.error(f"Error validating window_coords: {str(e)}, ignoring.")
+            window_coords = None
+
     # Store the strategy in game state
     game_state['search_strategy'] = strategy
     
-    # Use combined function to check for magic square and get next direction
-    is_magic, next_direction, square_info = detect_magic_square_and_navigate(
-        grid, 
-        strategy, 
-        game_state['found_squares'],
-        window_coords,
-        verbose_logging=game_state['verbose_logging']  # Pass verbose flag to magic_square module
-    )
-    
-    # Update game state
+    # Update steps count - ONLY update steps here
     game_state['steps'] += 1
     
-    if is_magic:
-        # Only count the magic square if it hasn't been found before
-        if square_info and square_info not in game_state['found_squares']:
-            game_state['magic_squares_found'] += 1
-            # Add the found square to our tracking list
-            game_state['found_squares'].append(square_info)
-            logger.info(f"New magic square detected at {square_info}! Total found: {game_state['magic_squares_found']}")
-            
-            # Verify the square_info format is correct
-            if 'type' not in square_info or 'position' not in square_info:
-                logger.error(f"Invalid square_info format! Expected 'type' and 'position' keys but got: {square_info}")
-            elif not isinstance(square_info['position'], tuple) or len(square_info['position']) != 2:
-                logger.error(f"Invalid position format in square_info! Expected tuple of length 2 but got: {square_info['position']}")
-            else:
-                logger.info(f"Square info format is valid: {square_info}")
-        elif square_info:
-            logger.info(f"Magic square already found before: {square_info}")
-        else:
-            logger.warning("Magic square detected but no square_info provided")
-    
-    # Check if game should end
-    if game_state['steps'] >= game_state['max_steps'] or game_state['magic_squares_found'] >= game_state['total_magic_squares']:
+    # Check game over condition based on steps ONLY
+    if game_state['steps'] >= game_state['max_steps']:
         game_state['game_over'] = True
-        logger.info(f"Game over! Steps: {game_state['steps']}, Magic squares found: {game_state['magic_squares_found']}")
+        logger.info(f"Game over! Steps limit reached: {game_state['steps']}")
+
+    # Calculate the next direction using the strategy
     
+    next_direction = calculate_next_direction(
+        grid,
+        strategy,
+        found_squares, # Pass revealed squares to strategy
+        window_coords,
+        game_state['verbose_logging']
+    )
+
     response_data = {
-        'is_magic_square': is_magic,
         'next_direction': next_direction,
         'steps': game_state['steps'],
-        'magic_squares_found': game_state['magic_squares_found'],
-        'game_over': game_state['game_over'],
-        'strategy': strategy,
-        'square_info': square_info if is_magic else None
+        'game_over': game_state['game_over'] # Let frontend know if step limit reached
     }
-    
-    logger.info(f"Response: is_magic_square={is_magic}, next_direction={next_direction}")
-    
+
+    logger.info(f"Response: next_direction={next_direction}, steps={game_state['steps']}, game_over={game_state['game_over']}")
+
     return jsonify(response_data)
 
 @app.route('/api/reset_game', methods=['POST'])
 def reset_game():
     data = request.json
     total_magic_squares = data.get('total_magic_squares', 3)
-    strategy = data.get('strategy', 'exploration')
+    strategy = data.get('strategy', 'random_walk')
     
     logger.info(f"Resetting game with {total_magic_squares} magic squares and '{strategy}' strategy")
     
     # Save current verbose_logging setting
     verbose_setting = game_state['verbose_logging']
     
-    game_state['steps'] = 0
-    game_state['max_steps'] = 100
-    game_state['magic_squares_found'] = 0
-    game_state['total_magic_squares'] = total_magic_squares
-    game_state['game_over'] = False
-    game_state['search_strategy'] = strategy
-    game_state['found_squares'] = []  # Reset the list of found squares
-    
-    # Restore verbose_logging setting
-    game_state['verbose_logging'] = verbose_setting
+    game_state.clear() # Clear the whole state
+    game_state.update({
+        'steps': 0,
+        'max_steps': 100,
+        'magic_squares_found': 0, # Frontend now tracks this
+        'total_magic_squares': total_magic_squares, # Still needed for frontend win condition
+        'game_over': False,
+        'search_strategy': strategy,
+        'found_squares': [],  # This might not be needed anymore
+        'verbose_logging': verbose_setting
+    })
     
     return jsonify({
         'status': 'game_reset',
@@ -350,24 +306,40 @@ def get_strategies():
     # Combine built-in and custom strategies
     strategies = [
         {
-            'id': 'exploration',
-            'name': 'Exploration Priority',
-            'description': 'Prioritizes unexplored areas of the grid'
-        },
-        {
             'id': 'random_walk',
-            'name': 'Random Walk',
+            'name': 'Randy S (Random Walk)',
             'description': 'Uses randomness with a bias toward unexplored areas'
         },
         {
-            'id': 'spiral',
-            'name': 'Spiral Search',
-            'description': 'Explores in a spiral pattern to systematically cover the board'
+            'id': 'zigzag_search',
+            'name': 'Tony R (Zigzag Search)',
+            'description': 'Searches in a zigzag pattern to systematically cover the board'
+        },
+
+        {
+            'id': 'adam_l',
+            'name': 'Adam L (Blackjack)',
+            'description': 'Blackjack-inspired strategy by Adam L.'
         },
         {
-            'id': 'pattern_detection',
-            'name': 'Pattern Detection',
-            'description': 'Searches for matching row and column sums that might indicate magic squares'
+            'id': 'meredith_n',
+            'name': 'Meredith N (Inner Zigzag)',
+            'description': 'Zigzag pattern avoiding grid borders.'
+        },
+        {
+            'id': 'james_c',
+            'name': 'James C (Proximity Explorer)',
+            'description': 'Moves towards closest unexplored cells.'
+        },
+        {
+            'id': 'jake_p',
+            'name': 'Jake P (The Snake)',
+            'description': 'Zigzag pattern with boundary checks.'
+        },
+        {
+            'id': 'jono_s',
+            'name': 'Jono S (Robot Vacuum)',
+            'description': 'Prioritizes unexplored cells (NaN), avoids obstacles (inf).'
         }
     ]
     
