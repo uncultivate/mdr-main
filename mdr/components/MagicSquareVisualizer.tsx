@@ -162,7 +162,8 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   const [gameStats, setGameStats] = useState({
     steps: 0,
     magicSquaresFound: 0,
-    gameOver: false
+    gameOver: false,
+    score: 0
   });
 
   // UI state from ArrayVisualizer
@@ -176,7 +177,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   const [verboseLogging, setVerboseLogging] = useState<boolean>(false);
   
   // Search strategy state
-  const [searchStrategy, setSearchStrategy] = useState<string>('exploration');
+  const [searchStrategy, setSearchStrategy] = useState<string>('random_walk');
   const [availableStrategies, setAvailableStrategies] = useState<Strategy[]>([
     { id: 'exploration', name: 'Exploration Priority', description: 'Prioritizes unexplored areas of the grid' },
     { id: 'random_walk', name: 'Random Walk', description: 'Uses randomness with a bias toward unexplored areas' },
@@ -189,6 +190,8 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   const [coords, setCoords] = useState<[Coordinates, Coordinates]>([[0, 0], [4, 4]]);
   const [magicGrids, setMagicGrids] = useState<MagicGrid[]>([]);
   const [windowCenter, setWindowCenter] = useState<Coordinates>([2, 2]);
+  const [aiMovementSpeed, setAiMovementSpeed] = useState<number>(800); // Keep the speed control
+  const [magicSquareCenters, setMagicSquareCenters] = useState<Coordinates[]>([]); // Store centers
   
   // Create a ref to the grid container
   const gridRef = useRef<HTMLDivElement>(null);
@@ -199,6 +202,14 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   const [customFunctionCode, setCustomFunctionCode] = useState('');
   const [customFunctionAuthor, setCustomFunctionAuthor] = useState('');
   const [customFunctionError, setCustomFunctionError] = useState<string | null>(null);
+  
+  // Create a ref to track ongoing AI operations
+  const aiOperationRef = useRef<boolean>(false);
+  
+  // Sleep function for controlled delays
+  const sleep = (ms: number): Promise<void> => {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  };
   
   // Fetch available strategies from the backend
   useEffect(() => {
@@ -256,6 +267,12 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
   }, [magicGrids, difficulty]);
 
   const unmask = (direction: 'up' | 'down' | 'left' | 'right') => {
+    // Increment step count for manual moves
+    setGameStats(prevStats => ({
+      ...prevStats,
+      steps: prevStats.steps + 1
+    }));
+    
     let newCenter: Coordinates = [...windowCenter] as Coordinates;
 
     switch (direction) {
@@ -279,17 +296,70 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     setWindowCenter(newCenter);
     setCoords(newCoords);
 
-    const newArray = currentArray.map(row => [...row]);
+    // --- Update Display Array Logic --- 
+    // 1. Create a mutable copy of the current array state
+    let newDisplayArray = currentArray.map(row => [...row]);
+    
+    // 2. Reveal the new window area from the fullArray onto the copy
     const [[newMinRow, newMinCol], [newMaxRow, newMaxCol]] = newCoords;
     for (let i = newMinRow; i <= newMaxRow; i++) {
       for (let j = newMinCol; j <= newMaxCol; j++) {
-        newArray[i][j] = fullArray[i][j];
+        if (i >= 0 && i < boardSize && j >= 0 && j < boardSize) {
+             newDisplayArray[i][j] = fullArray[i][j]; // Reveal new area
+        }
       }
     }
-    setCurrentArray(newArray);
     
-    // Call the backend after unmasking
-    if (!aiMode) detectMagicSquare();
+    // 3. Check for magic square at the new center position
+    const [currentRow, currentCol] = newCenter;
+    const matchedCenterIndex = magicSquareCenters.findIndex(
+      center => center[0] === currentRow && center[1] === currentCol
+    );
+
+    if (matchedCenterIndex !== -1) {
+      const matchedGrid = magicGrids.find(grid => {
+        const gridCenterRow = grid.row + Math.floor(grid.size / 2);
+        const gridCenterCol = grid.col + Math.floor(grid.size / 2);
+        return gridCenterRow === currentRow && gridCenterCol === currentCol && !grid.revealed;
+      });
+
+      if (matchedGrid) {
+        console.log(`Sliding window centered on unrevealed magic square at [${matchedGrid.row}, ${matchedGrid.col}]`);
+
+        // Reveal the magic square in the magicGrids state
+        setMagicGrids(prev =>
+          prev.map(grid =>
+            grid.row === matchedGrid.row && grid.col === matchedGrid.col
+              ? { ...grid, revealed: true }
+              : grid
+          )
+        );
+
+        // Update game stats
+        setGameStats(prevStats => ({
+          ...prevStats,
+          magicSquaresFound: prevStats.magicSquaresFound + 1
+        }));
+
+        // 4. Mark the found magic square *directly* on the newDisplayArray
+        for (let r = matchedGrid.row; r < matchedGrid.row + matchedGrid.size; r++) {
+          for (let c = matchedGrid.col; c < matchedGrid.col + matchedGrid.size; c++) {
+            if (r >= 0 && r < boardSize && c >= 0 && c < boardSize && 
+                newDisplayArray[r][c] !== null && newDisplayArray[r][c] !== Infinity) {
+              newDisplayArray[r][c] = Infinity; 
+            }
+          }
+        }
+
+        // Show toast message
+        setToastMessage("Magic square Found and Revealed!");
+        setTimeout(() => setToastMessage(""), 2000);
+      }
+    }
+    
+    // 5. Set the final state *once* with the updated newDisplayArray
+    setCurrentArray(newDisplayArray); 
+    // --- End Update Display Array Logic ---
   };
 
   useEffect(() => {
@@ -316,36 +386,37 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
           break;
         case 'Enter': { // Change from 'Spacebar' to 'Enter'
           event.preventDefault();
-          const [[minRow, minCol], [maxRow, maxCol]] = coords;
-          const visibleMagicGrids = magicGrids.filter(grid => {
+          // Find the magic grid whose center EXACTLY matches the windowCenter
+          const gridToReveal = magicGrids.find(grid => {
             const gridCenterRow = grid.row + Math.floor(grid.size / 2);
             const gridCenterCol = grid.col + Math.floor(grid.size / 2);
-            return gridCenterRow >= minRow && gridCenterRow <= maxRow &&
-                   gridCenterCol >= minCol && gridCenterCol <= maxCol &&
+            return gridCenterRow === windowCenter[0] &&
+                   gridCenterCol === windowCenter[1] &&
                    !grid.revealed;
           });
-          if (visibleMagicGrids.length === 0) break;
-          const gridToReveal = visibleMagicGrids.reduce((closest, current) => {
-            const currentCenterRow = current.row + Math.floor(current.size / 2);
-            const currentCenterCol = current.col + Math.floor(current.size / 2);
-            const closestCenterRow = closest.row + Math.floor(closest.size / 2);
-            const closestCenterCol = closest.col + Math.floor(closest.size / 2);
-            const currentDistance = Math.abs(currentCenterRow - windowCenter[0]) + Math.abs(currentCenterCol - windowCenter[1]);
-            const closestDistance = Math.abs(closestCenterRow - windowCenter[0]) + Math.abs(closestCenterCol - windowCenter[1]);
-            return currentDistance < closestDistance ? current : closest;
-          }, visibleMagicGrids[0]);
 
-          setMagicGrids(prev =>
-            prev.map(grid => {
-              const gridCenterRow = grid.row + Math.floor(grid.size / 2);
-              const gridCenterCol = grid.col + Math.floor(grid.size / 2);
-              if (gridCenterRow === gridToReveal.row + Math.floor(gridToReveal.size / 2) &&
-                  gridCenterCol === gridToReveal.col + Math.floor(gridToReveal.size / 2)) {
-                return { ...grid, revealed: true };
-              }
-              return grid;
-            })
-          );
+          // If such a grid exists, reveal it
+          if (gridToReveal) {
+            setMagicGrids(prev =>
+              prev.map(grid => {
+                if (grid.row === gridToReveal.row && grid.col === gridToReveal.col) {
+                  console.log(`Revealing magic square via Enter key at [${gridToReveal.row}, ${gridToReveal.col}] because windowCenter matches.`);
+                  return { ...grid, revealed: true };
+                }
+                return grid;
+              })
+            );
+            
+            // Increment score when a magic square is revealed
+            setGameStats(prevStats => ({
+              ...prevStats,
+              magicSquaresFound: prevStats.magicSquaresFound + 1
+            }));
+            
+            // Show toast message
+            setToastMessage("Magic square Found and Revealed!");
+            setTimeout(() => setToastMessage(""), 2000);
+          }
           break;
         }
         default:
@@ -429,7 +500,8 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
       setGameStats({
         steps: 0,
         magicSquaresFound: 0,
-        gameOver: false
+        gameOver: false,
+        score: 0
       });
       setAiMode(false);
     } catch (error) {
@@ -439,7 +511,10 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     }
   };
 
-  const generateBoardWithMagicGrids = () => {
+  const generateBoardWithMagicGrids = async () => {
+    // Reset the game state before generating a new board
+    await resetGame();
+
     const arr: Grid = Array(boardSize)
       .fill(0)
       .map(() =>
@@ -480,9 +555,38 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
         let placed = false;
         let tries = 0;
         while (!placed && tries < 20) {
-          const startRow = Math.floor(Math.random() * (boardSize - size));
-          const startCol = Math.floor(Math.random() * (boardSize - size));
+          let startRow, startCol;
 
+          if (size === 3 && boardSize >= 5) {
+            // Ensure 3x3 doesn't touch the edges. 
+            // Valid range for startRow/startCol is [1, boardSize - 4].
+            const minValidStart = 1;
+            const maxValidStart = boardSize - 4;
+            if (maxValidStart < minValidStart) {
+              // This case should theoretically not happen if boardSize >= 5
+              // If it does, skip placement for this square.
+              console.warn("Board too small to place 3x3 square away from edge. Skipping.");
+              tries = 20; // Force exit loop
+              continue;
+            }
+            // Calculate range length: (max - min + 1)
+            const rangeLength = maxValidStart - minValidStart + 1; 
+            startRow = Math.floor(Math.random() * rangeLength) + minValidStart; 
+            startCol = Math.floor(Math.random() * rangeLength) + minValidStart; 
+          } else {
+            // Original logic for 5x5 or boards < 5x5
+            // Valid range for startRow/startCol is [0, boardSize - size].
+            const maxValidStartOriginal = boardSize - size;
+            if (maxValidStartOriginal < 0) {
+              console.warn(`Board too small (${boardSize}x${boardSize}) to place ${size}x${size} square. Skipping.`);
+              tries = 20; // Force exit loop
+              continue;
+            }
+            startRow = Math.floor(Math.random() * (maxValidStartOriginal + 1));
+            startCol = Math.floor(Math.random() * (maxValidStartOriginal + 1));
+          }
+
+          // Check for overlap with existing magic squares
           const overlap = newMagicGrids.some(existing => {
             return !(
               startRow + size <= existing.row ||
@@ -529,6 +633,14 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     setMagicGrids(newMagicGrids);
     setForceScale(true);
 
+    // Store the center positions of the magic squares
+    const centers: Coordinates[] = newMagicGrids.map(grid => [
+      grid.row + Math.floor(grid.size / 2),
+      grid.col + Math.floor(grid.size / 2)
+    ]);
+    setMagicSquareCenters(centers);
+    console.log("Stored magic square centers:", centers);
+
     const totalRequestedLarge = magic5Qty;
     const totalRequestedSmall = magic3Qty;
     const message = `Successfully placed ${placedLarge} of ${totalRequestedLarge} large magic square(s), and ${placedSmall} of ${totalRequestedSmall} small magic square(s).`;
@@ -536,24 +648,26 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
     setTimeout(() => setToastMessage(""), 4000);
   };
 
-  const detectMagicSquare = async () => {
-    // Use NaN instead of null for unexplored cells
+  // Renamed function: Only gets the next move direction from the backend
+  const getNextMoveFromBackend = async () => {
+    // Only send necessary data for navigation strategy
     const gridToSend = currentArray.map(row => 
       row.map(val => val === null ? Number.NaN : val)
     );
     
     try {
-      console.log('Attempting to connect to backend at:', getApiUrl('api/detect_magic_square'));
-      const response = await fetch(getApiUrl('api/detect_magic_square'), {
+      console.log('Requesting next move from backend at:', getApiUrl('api/get_next_move'));
+      const response = await fetch(getApiUrl('api/get_next_move'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
         body: JSON.stringify({ 
-          grid: gridToSend,
+          grid: gridToSend, 
           strategy: searchStrategy,
-          window_coords: coords
+          window_coords: coords, 
+          found_squares: magicGrids.filter(g => g.revealed).map(g => ({ type: g.size === 3 ? '3x3' : '5x5', position: [g.row, g.col] }))
         }),
       });
       
@@ -563,142 +677,153 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
       
       const data = await response.json();
       
-      setGameStats({
-        steps: data.steps,
-        magicSquaresFound: data.magic_squares_found,
-        gameOver: data.game_over
-      });
+      // Return the full data needed by the AI loop
+      return { 
+        next_direction: data.next_direction, 
+        steps: data.steps, 
+        game_over: data.game_over 
+      };
       
-      if (data.is_magic_square && data.square_info) {
-        // Highlight the magic square found
-        setToastMessage("Magic square found!");
-        setTimeout(() => setToastMessage(""), 2000);
-        
-        // Find all potential magic squares in the current view window
-        const [[minRow, minCol], [maxRow, maxCol]] = coords;
-        
-        // Log the found square information
-        console.log(`Backend found a magic square: ${JSON.stringify(data.square_info)}`);
-        
-        // Extract the position and size from the square_info
-        const { type, position } = data.square_info;
-        const [squareRow, squareCol] = position;
-        const squareSize = type === '3x3' ? 3 : 5;
-        
-        // Calculate the center of the found magic square
-        const centerRow = squareRow + Math.floor(squareSize / 2);
-        const centerCol = squareCol + Math.floor(squareSize / 2);
-        
-        // Mark this square in our current grid view if it's visible
-        if (centerRow >= minRow && centerRow <= maxRow && 
-            centerCol >= minCol && centerCol <= maxCol) {
-          
-          // Create a new copy of the current array
-          const newArray = currentArray.map(row => [...row]);
-          
-          // Mark all cells in the found magic square with Infinity, not just the center
-          for (let r = squareRow; r < squareRow + squareSize; r++) {
-            for (let c = squareCol; c < squareCol + squareSize; c++) {
-              // Check if this cell is within the visible window and has a valid value
-              if (r >= minRow && r <= maxRow && c >= minCol && c <= maxCol && 
-                  newArray[r] && newArray[r][c] !== null) {
-                console.log(`Marking found magic square cell at [${r}, ${c}] with Infinity`);
-                newArray[r][c] = Infinity;
-              }
-            }
-          }
-          
-          setCurrentArray(newArray);
-        }
-        
-        // Check if the center of the found square is in the visible window
-        const isCenterVisible = centerRow >= minRow && centerRow <= maxRow && 
-                               centerCol >= minCol && centerCol <= maxCol;
-        
-        if (isCenterVisible) {
-          // Get all unrevealed magic grids in the current window whose center matches
-          // the detected magic square's center
-          const visibleMagicGrids = magicGrids.filter(grid => {
-            const gridCenterRow = grid.row + Math.floor(grid.size / 2);
-            const gridCenterCol = grid.col + Math.floor(grid.size / 2);
-            
-            // Check if this grid matches the detected magic square's position
-            const isMatch = Math.abs(gridCenterRow - centerRow) <= 1 && 
-                           Math.abs(gridCenterCol - centerCol) <= 1 &&
-                           grid.size === squareSize &&
-                           !grid.revealed;
-            
-            return isMatch;
-          });
-          
-          if (visibleMagicGrids.length > 0) {
-            // Choose the closest magic grid to the found square
-            const gridToReveal = visibleMagicGrids[0];
-            
-            // Reveal the chosen magic grid
-            setMagicGrids(prev =>
-              prev.map(grid => {
-                if (grid.row === gridToReveal.row && grid.col === gridToReveal.col) {
-                  return { ...grid, revealed: true };
-                }
-                return grid;
-              })
-            );
-            
-            console.log(`Magic square found and revealed at row: ${gridToReveal.row}, col: ${gridToReveal.col}`);
-          } else {
-            console.log("Magic square detected but couldn't match it to a known magic grid in the current view");
-          }
-        } else {
-          console.log("Magic square found but it's not in the current visible window");
-        }
-      }
-      
-      if (aiMode && !data.game_over) {
-        // Move in the suggested direction
-        unmask(data.next_direction as 'up' | 'down' | 'left' | 'right');
-      }
-      
-      return data;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       console.error('Error connecting to backend:', error);
       setToastMessage(`Error connecting to backend: ${errorMessage}`);
       setTimeout(() => setToastMessage(""), 4000);
       if (onError) onError(errorMessage);
-      return null;
-    }
-  };
-  
-  const toggleAIMode = async () => {
-    const newAiMode = !aiMode;
-    setAiMode(newAiMode);
-    
-    if (newAiMode) {
-      // Start AI playing
-      const data = await detectMagicSquare();
-      if (data && !data.game_over) {
-        unmask(data.next_direction as 'up' | 'down' | 'left' | 'right');
-      }
+      // Return default values on error, including game_over false to prevent loops
+      return { next_direction: 'right', steps: gameStats.steps, game_over: false }; 
     }
   };
   
   // Effect for AI mode moves
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (aiMode && !gameStats.gameOver) {
-      timer = setTimeout(async () => {
-        const data = await detectMagicSquare();
-        if (data && !data.game_over) {
-          unmask(data.next_direction as 'up' | 'down' | 'left' | 'right');
+    // Create a flag for cleanup
+    let isMounted = true;
+    
+    const runSingleAiStep = async () => {
+      // Only run if AI mode is on, game not over, and no operation is in progress
+      if (!aiMode || gameStats.gameOver || aiOperationRef.current || !isMounted) {
+        return;
+      }
+      
+      try {
+        aiOperationRef.current = true; // Mark as busy
+
+        // Get next move direction, steps, and game over status from backend
+        console.log(`AI requesting next move (current center: ${windowCenter})...`); 
+        const data = await getNextMoveFromBackend(); 
+
+        // Update game stats immediately (mostly for step count display)
+        setGameStats(prev => ({ ...prev, steps: data.steps, gameOver: data.game_over }));
+
+        // Check if game is over based on the response *before* moving
+        if (data.game_over || !isMounted || !aiMode) {
+          console.log(`Game Over signal received (steps: ${data.steps}) or AI stopped. Halting AI loop.`);
+          aiOperationRef.current = false; // Reset lock
+          return; // Stop the loop
         }
-      }, 200); // Move every 200ms (5 times per second) instead of 1000ms
+        
+        // Execute the move if we have a valid direction
+        if (data && data.next_direction) {
+          console.log(`AI received direction: ${data.next_direction}. Executing unmask...`);
+          unmask(data.next_direction as 'up' | 'down' | 'left' | 'right'); 
+          
+          // Wait *after* unmask is called, before resetting the flag.
+          // This delay controls the speed between moves.
+          console.log(`AI waiting ${aiMovementSpeed}ms after initiating move...`);
+          await sleep(aiMovementSpeed); 
+        } else {
+          console.log("AI received no valid direction or null data from backend.");
+          // If no direction, still wait before resetting the flag to avoid rapid retries?
+          // Or maybe reset immediately? Let's reset immediately for now.
+          // await sleep(aiMovementSpeed); // Optional: Add delay even if no direction?
+        }
+
+      } catch (error) {
+        console.error('Error in AI move step:', error);
+         // Wait longer on error before allowing next trigger
+        if (isMounted) {
+             await sleep(1000); 
+        }
+      } finally {
+         // Reset the flag *after* the sleep/wait or error handling
+         if (isMounted) {
+             console.log("AI step finished, resetting operation flag."); 
+             aiOperationRef.current = false;
+         }
+      }
+    };
+    
+    // Trigger the AI step logic if AI mode is on
+    if(aiMode && !gameStats.gameOver){
+        runSingleAiStep();
     }
     
+    // Cleanup function
     return () => {
-      if (timer) clearTimeout(timer);
+      isMounted = false;
+      aiOperationRef.current = false; // Reset the ref on cleanup/toggle
     };
-  }, [aiMode, coords, gameStats.gameOver]);
+  // Depend on windowCenter, aiMode, gameOver, and speed.
+  }, [aiMode, gameStats.gameOver, aiMovementSpeed, windowCenter]);
+  
+  // Update toggleAIMode to work with our new approach
+  const toggleAIMode = () => {
+    const newAiMode = !aiMode;
+    setAiMode(newAiMode);
+    
+    // Log the change for debugging
+    console.log(`AI mode ${newAiMode ? 'enabled' : 'disabled'}, movement speed: ${aiMovementSpeed}ms`);
+  };
+  
+  // Effect to handle game over conditions
+  useEffect(() => {
+    // Calculate how many total magic squares exist on the board
+    const totalMagicSquares = magic3Qty + magic5Qty;
+    
+    // Check if game should be over based on our custom rules
+    if (!gameStats.gameOver) {
+      if (gameStats.steps >= 100) {
+        // Game over if we reach 100 steps
+        console.log("Game over: 100 steps reached.");
+        
+        // Calculate score with new formula
+        const baseScore = gameStats.magicSquaresFound * 100;
+        const stepsBonus = 100 - gameStats.steps; // Will be 0 if steps = 100
+        const allSquaresBonus = (gameStats.magicSquaresFound === totalMagicSquares && totalMagicSquares > 0) ? 50 : 0;
+        const finalScore = baseScore + stepsBonus + allSquaresBonus;
+        
+        setGameStats(prev => ({ 
+          ...prev, 
+          gameOver: true,
+          score: finalScore
+        }));
+        
+        setToastMessage("Game over! Maximum steps reached.");
+        setTimeout(() => setToastMessage(""), 3000);
+        setAiMode(false); // Stop AI if running
+      } else if (totalMagicSquares > 0 && gameStats.magicSquaresFound >= totalMagicSquares) {
+        // Game over if all magic squares have been found
+        console.log("Game over: All magic squares found.");
+        
+        // Calculate score with new formula
+        const baseScore = gameStats.magicSquaresFound * 100;
+        const stepsBonus = 100 - gameStats.steps;
+        const allSquaresBonus = 50; // Always 50 bonus here since all squares were found
+        const finalScore = baseScore + stepsBonus + allSquaresBonus;
+        
+        setGameStats(prev => ({ 
+          ...prev, 
+          gameOver: true,
+          score: finalScore
+        }));
+        
+        setToastMessage("Game over! All magic squares found!");
+        setTimeout(() => setToastMessage(""), 3000);
+        setAiMode(false); // Stop AI if running
+      }
+    }
+  }, [gameStats.steps, gameStats.magicSquaresFound, magic3Qty, magic5Qty, gameStats.gameOver]);
   
   // Initialize on component mount
   useEffect(() => {
@@ -834,7 +959,16 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
           
         {gameStats.gameOver && (
           <div className="bg-purple-900 p-3 rounded mb-4 text-white text-center">
-            Game Over! Final Score: {gameStats.magicSquaresFound} magic squares found in {gameStats.steps} steps.  <Button
+            <div className="mb-2">Game Over!</div>
+            <div className="mb-3">
+              <div>Magic Squares: {gameStats.magicSquaresFound} found in {gameStats.steps} steps</div>
+              <div className="text-xl font-bold mt-2">Final Score: {gameStats.score}</div>
+              <div className="text-sm mt-1 text-gray-300">
+                ({gameStats.magicSquaresFound} squares × 100 points + {100 - gameStats.steps} steps remaining
+                {gameStats.magicSquaresFound === magic3Qty + magic5Qty && magic3Qty + magic5Qty > 0 ? ' + 50 bonus' : ''})
+              </div>
+            </div>
+            <Button
               variant="outline"
               onClick={resetGame}
               className="mt-2 bg-purple-800 hover:bg-purple-700 text-white hover:text-white"
@@ -862,23 +996,26 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
                   j >= grid.col && j < grid.col + grid.size
                 );
 
+                // Check if cell is in a revealed magic square - this should take priority
+                const isInRevealedMagicGrid = magicGrids.some(grid =>
+                  i >= grid.row && i < grid.row + grid.size &&
+                  j >= grid.col && j < grid.col + grid.size && 
+                  grid.revealed
+                );
+
                 let magicTextClass = "";
                 if (val !== null) {
-                  if (val === Infinity) {
-                    // Special styling for found magic square centers
-                    magicTextClass = "text-purple-600 font-bold";
+                  if (isInRevealedMagicGrid) {
+                    // Revealed magic squares get highest priority - always green
+                    magicTextClass = "text-green-600";
+                  } else if (val === Infinity) {
+                    // Magic square centers with Infinity should also be green for consistency
+                    magicTextClass = "text-green-600 font-bold";
                   } else if (difficulty === 'easy' && inMagicGrid) {
                     magicTextClass = "text-pink-600";
                   } else if (difficulty === 'medium' && highlightCells.some(([r, c]) => r === i && c === j)) {
                     magicTextClass = "text-pink-600";
                   }
-                }
-
-                if (magicGrids.some(grid =>
-                    i >= grid.row && i < grid.row + grid.size &&
-                    j >= grid.col && j < grid.col + grid.size && grid.revealed
-                )) {
-                  magicTextClass = "text-green-600";
                 }
 
                 const magicCenterGrid = magicGrids.find(grid =>
@@ -944,7 +1081,7 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
                       h-12 w-12 flex items-center justify-center
                       bg-transparent
                       ${isWithinWindow ? 'ring-[#24e4f2]' : ''}
-                      ${val === Infinity ? 'text-green-600' : magicTextClass ? magicTextClass : "text-[#24e4f2]"}
+                      ${isInRevealedMagicGrid ? 'text-green-600' : val === Infinity ? 'text-green-600 font-bold' : magicTextClass ? magicTextClass : "text-[#24e4f2]"}
                       ${isCenterCell ? 'center-window' : ''}
                     `}
                     data-base-scale={baseScale}
@@ -1027,6 +1164,20 @@ const MagicSquareVisualizer: React.FC<MagicSquareVisualizerProps> = ({ onError }
               onChange={(e) => setMagic3Qty(parseInt(e.target.value) || 0)}
               className="p-1 rounded border border-gray-300 text-black"
             />
+          </div>
+          <div>
+            <label className="mr-2">AI Movement Speed (ms):</label>
+            <select
+              value={aiMovementSpeed}
+              onChange={(e) => setAiMovementSpeed(parseInt(e.target.value))}
+              className="p-1 rounded border border-gray-300 text-black"
+            >
+              <option value="200">Very Fast (200ms)</option>
+              <option value="500">Fast (500ms)</option>
+              <option value="800">Medium (800ms)</option>
+              <option value="1500">Slow (1.5s)</option>
+              <option value="3000">Very Slow (3s)</option>
+            </select>
           </div>
           <div>
             <label className="mr-2">Hints:</label>
